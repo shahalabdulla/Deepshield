@@ -5,18 +5,19 @@ function Results() {
   const location = useLocation();
   const { state } = location || {};
 
-  const verdict = state?.verdict || "FAKE";
+  const verdict    = state?.verdict    || "FAKE";
   const confidence = state?.confidence ?? 0.91;
-  const filename = state?.filename || "sample-video.mp4";
+  const filename   = state?.filename   || "sample-video.mp4";
+  const heatmapUrl = state?.heatmap_url || null;
 
   const models = state?.models || [
-    { name: "Xception", score: 0.94 },
+    { name: "Xception",     score: 0.94 },
     { name: "EfficientNet", score: 0.88 },
-    { name: "MesoNet", score: 0.9 },
+    { name: "MesoNet",      score: 0.90 },
   ];
 
   const getVerdictStyle = () => {
-    if (verdict === "REAL") return "real";
+    if (verdict === "REAL")      return "real";
     if (verdict === "UNCERTAIN") return "uncertain";
     return "fake";
   };
@@ -29,8 +30,7 @@ function Results() {
       : "score-ring";
 
   const handleDownloadReport = () => {
-    // Hook this to backend report endpoint when available
-    // Example: window.open(`/api/report/${state?.analysisId}`, "_blank");
+    // Will connect to backend PDF endpoint in Week 6
   };
 
   return (
@@ -83,11 +83,7 @@ function Results() {
           </div>
           <div
             className="flex gap-md"
-            style={{
-              alignItems: "center",
-              justifyContent: "flex-end",
-              flexWrap: "wrap",
-            }}
+            style={{ alignItems: "center", justifyContent: "flex-end", flexWrap: "wrap" }}
           >
             <button
               className="btn btn-secondary btn-md"
@@ -95,10 +91,7 @@ function Results() {
             >
               New analysis
             </button>
-            <button
-              className="btn btn-primary btn-md"
-              onClick={handleDownloadReport}
-            >
+            <button className="btn btn-primary btn-md" onClick={handleDownloadReport}>
               Download report
             </button>
           </div>
@@ -111,15 +104,12 @@ function Results() {
             gap: "var(--space-xl)",
           }}
         >
+          {/* ── Left column ── */}
           <section>
             <div className="card-elevated" style={{ marginBottom: "var(--space-xl)" }}>
               <div
                 className="flex"
-                style={{
-                  gap: "var(--space-xl)",
-                  alignItems: "center",
-                  flexWrap: "wrap",
-                }}
+                style={{ gap: "var(--space-xl)", alignItems: "center", flexWrap: "wrap" }}
               >
                 <div className={ringClass}>
                   <div
@@ -128,16 +118,10 @@ function Results() {
                   >
                     Confidence
                   </div>
-                  <div
-                    className="font-black"
-                    style={{ fontSize: "var(--font-3xl)" }}
-                  >
+                  <div className="font-black" style={{ fontSize: "var(--font-3xl)" }}>
                     {(confidence * 100).toFixed(1)}%
                   </div>
-                  <div
-                    className="text-xs text-muted"
-                    style={{ marginTop: "4px" }}
-                  >
+                  <div className="text-xs text-muted" style={{ marginTop: 4 }}>
                     model estimate
                   </div>
                 </div>
@@ -159,10 +143,7 @@ function Results() {
             </div>
 
             <div className="card">
-              <h2
-                className="font-semibold text-lg"
-                style={{ marginBottom: "var(--space-md)" }}
-              >
+              <h2 className="font-semibold text-lg" style={{ marginBottom: "var(--space-md)" }}>
                 Model scores
               </h2>
               <div
@@ -182,16 +163,10 @@ function Results() {
                       background: "rgba(10,10,15,0.6)",
                     }}
                   >
-                    <div
-                      className="font-semibold text-sm"
-                      style={{ marginBottom: 4 }}
-                    >
+                    <div className="font-semibold text-sm" style={{ marginBottom: 4 }}>
                       {m.name}
                     </div>
-                    <div
-                      className="text-secondary text-xs"
-                      style={{ marginBottom: 8 }}
-                    >
+                    <div className="text-secondary text-xs" style={{ marginBottom: 8 }}>
                       Deepfake likelihood
                     </div>
                     <div className="progress-bar" style={{ marginBottom: 6 }}>
@@ -209,80 +184,96 @@ function Results() {
             </div>
           </section>
 
+          {/* ── Right column ── */}
           <section>
             <div className="card" style={{ marginBottom: "var(--space-xl)" }}>
-              <h2
-                className="font-semibold text-lg"
-                style={{ marginBottom: "var(--space-md)" }}
-              >
+              <h2 className="font-semibold text-lg" style={{ marginBottom: "var(--space-md)" }}>
                 Heatmap visualization
               </h2>
+
+              {/* ── Real heatmap OR placeholder ── */}
               <div
                 style={{
-                  position: "relative",
                   borderRadius: "var(--radius-lg)",
                   border: "1px solid var(--border)",
                   background: "#050509",
-                  height: 260,
                   overflow: "hidden",
                   marginBottom: "var(--space-md)",
+                  minHeight: 260,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
                 }}
               >
-                <div
-                  style={{
-                    position: "absolute",
-                    inset: 0,
-                    background:
-                      "radial-gradient(circle at 30% 40%, rgba(239,68,68,0.4), transparent 60%), radial-gradient(circle at 70% 60%, rgba(99,102,241,0.35), transparent 55%)",
-                    opacity: 0.9,
-                  }}
-                />
-                <div
-                  style={{
-                    position: "absolute",
-                    inset: 0,
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: "var(--space-sm)",
-                  }}
-                >
-                  <div className="text-secondary text-sm">
-                    Heatmap overlay placeholder
+                {heatmapUrl ? (
+                  <img
+                    src={heatmapUrl}
+                    alt="Grad-CAM heatmap"
+                    style={{
+                      width: "100%",
+                      display: "block",
+                      borderRadius: "var(--radius-lg)",
+                    }}
+                  />
+                ) : (
+                  <div
+                    style={{
+                      position: "relative",
+                      width: "100%",
+                      height: 260,
+                      overflow: "hidden",
+                    }}
+                  >
+                    {/* Decorative gradient placeholder */}
+                    <div
+                      style={{
+                        position: "absolute",
+                        inset: 0,
+                        background:
+                          "radial-gradient(circle at 30% 40%, rgba(239,68,68,0.4), transparent 60%), radial-gradient(circle at 70% 60%, rgba(99,102,241,0.35), transparent 55%)",
+                        opacity: 0.9,
+                      }}
+                    />
+                    <div
+                      style={{
+                        position: "absolute",
+                        inset: 0,
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: "var(--space-sm)",
+                      }}
+                    >
+                      <div className="text-secondary text-sm">
+                        Heatmap not available for this file
+                      </div>
+                      <div className="text-muted text-xs">
+                        Heatmap is generated for image files only
+                      </div>
+                    </div>
                   </div>
-                  <div className="text-muted text-xs">
-                    Integrate your video player and overlay here.
-                  </div>
-                </div>
+                )}
               </div>
+
               <p className="text-secondary text-sm">
-                The heatmap highlights regions that contributed most to the deepfake
-                likelihood estimate. Brighter areas indicate higher contribution.
-                Use this alongside domain expertise to judge whether the content is
-                trustworthy.
+                {heatmapUrl
+                  ? "Red regions indicate areas most likely to be AI-manipulated. Generated using Grad-CAM on the Xception model."
+                  : "The heatmap highlights regions that contributed most to the deepfake likelihood estimate. Brighter areas indicate higher contribution."}
               </p>
             </div>
 
             <div className="card">
-              <h2
-                className="font-semibold text-lg"
-                style={{ marginBottom: "var(--space-md)" }}
-              >
+              <h2 className="font-semibold text-lg" style={{ marginBottom: "var(--space-md)" }}>
                 How to interpret these results
               </h2>
               <ul
                 className="text-secondary text-sm"
-                style={{
-                  paddingLeft: "1.1rem",
-                  display: "grid",
-                  gap: "0.35rem",
-                }}
+                style={{ paddingLeft: "1.1rem", display: "grid", gap: "0.35rem" }}
               >
                 <li>
                   High confidence does not guarantee that a sample is authentic or
-                  manipulated; it reflects the model estimate given the observed
-                  patterns.
+                  manipulated; it reflects the model estimate given the observed patterns.
                 </li>
                 <li>
                   Review heatmaps and model scores together, especially for
@@ -306,4 +297,3 @@ function Results() {
 }
 
 export default Results;
-

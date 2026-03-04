@@ -12,13 +12,11 @@ function Upload() {
   const handleFileSelect = (selected) => {
     if (!selected || !selected[0]) return;
     const f = selected[0];
-
     const allowed = ["video/", "image/"];
     if (!allowed.some((prefix) => f.type.startsWith(prefix))) {
       setError("Only video and image files are supported.");
       return;
     }
-
     setError("");
     setFile(f);
   };
@@ -35,38 +33,34 @@ function Upload() {
   };
 
   const startUpload = async () => {
-    if (!file || uploading) return
-    setUploading(true)
-    setError("")
-    setProgress(10)
-  
+    if (!file || uploading) return;
+    setUploading(true);
+    setError("");
+    setProgress(10);
+
     try {
-      const formData = new FormData()
-      formData.append("file", file)
-  
+      const formData = new FormData();
+      formData.append("file", file);
+
       const interval = setInterval(() => {
-        setProgress(p => p >= 85 ? p : p + 8)
-      }, 400)
-  
-      const response = await fetch(
-        "http://127.0.0.1:8000/analyze",
-        {
-          method: "POST",
-          body: formData,
-        }
-      )
-  
-      clearInterval(interval)
-  
-      if (!response.ok) {
-        throw new Error("Analysis failed")
-      }
-  
-      const result = await response.json()
-      setProgress(100)
-  
-      await new Promise(res => setTimeout(res, 400))
-  
+        setProgress((p) => (p >= 85 ? p : p + 8));
+      }, 400);
+
+      const response = await fetch("http://127.0.0.1:8000/analyze", {
+        method: "POST",
+        body: formData,
+      });
+
+      clearInterval(interval);
+
+      if (!response.ok) throw new Error("Analysis failed");
+
+      const result = await response.json();
+      setProgress(100);
+
+      await new Promise((res) => setTimeout(res, 400));
+
+      // ── Navigate with heatmap_url included ──
       navigate("/results", {
         state: {
           filename: file.name,
@@ -74,26 +68,24 @@ function Upload() {
           verdict: result.verdict,
           confidence: result.confidence / 100,
           models: [
-            { name: "Xception", score: result.xception_score / 100 },
+            { name: "Xception",     score: result.xception_score / 100 },
             { name: "EfficientNet", score: result.efficientnet_score / 100 },
-            { name: "MesoNet", score: result.mesonet_score / 100 },
+            { name: "MesoNet",      score: result.mesonet_score / 100 },
           ],
           frames_analyzed: result.frames_analyzed,
           processing_time: result.processing_time,
+          heatmap_url: result.heatmap_url,   // ← real heatmap from backend
         },
-      })
-  
+      });
     } catch (err) {
       console.error(err);
       setError(
         "Could not reach analysis server. Make sure the backend is running."
-      )
-      setUploading(false)
-      setProgress(0)
+      );
+      setUploading(false);
+      setProgress(0);
     }
   };
-
-
 
   const cancelUpload = () => {
     setUploading(false);
@@ -132,33 +124,21 @@ function Upload() {
             Upload media for analysis
           </h1>
           <p className="text-secondary text-base">
-            Supported formats: common video containers (MP4, MOV, MKV) and image
-            formats (JPEG, PNG). Maximum size depends on your deployment.
+            Supported formats: MP4, MOV, MKV, JPEG, PNG.
+            Files are deleted immediately after analysis.
           </p>
         </header>
 
         <section>
           <div
             className={`upload-zone${dragging ? " dragging" : ""}`}
-            onDragEnter={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              setDragging(true);
-            }}
-            onDragOver={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-            }}
-            onDragLeave={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              setDragging(false);
-            }}
+            onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setDragging(true); }}
+            onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+            onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setDragging(false); }}
             onDrop={onDrop}
             onClick={() => {
               if (uploading) return;
-              const input = document.getElementById("file-input");
-              if (input) input.click();
+              document.getElementById("file-input")?.click();
             }}
           >
             <input
@@ -169,10 +149,7 @@ function Upload() {
               accept="video/*,image/*"
             />
 
-            <h2
-              className="font-semibold text-xl"
-              style={{ marginBottom: "var(--space-sm)" }}
-            >
+            <h2 className="font-semibold text-xl" style={{ marginBottom: "var(--space-sm)" }}>
               Drag and drop a file here
             </h2>
             <p className="text-secondary text-sm" style={{ marginBottom: "var(--space-md)" }}>
@@ -190,10 +167,7 @@ function Upload() {
                 }}
               >
                 <div className="text-sm text-secondary">Selected file</div>
-                <div
-                  className="font-semibold"
-                  style={{ marginTop: "var(--space-xs)" }}
-                >
+                <div className="font-semibold" style={{ marginTop: "var(--space-xs)" }}>
                   {file.name}
                 </div>
                 <div className="text-muted text-xs">
@@ -206,11 +180,7 @@ function Upload() {
           {error && (
             <p
               className="text-sm"
-              style={{
-                color: "#fca5a5",
-                marginTop: "var(--space-md)",
-                textAlign: "center",
-              }}
+              style={{ color: "#fca5a5", marginTop: "var(--space-md)", textAlign: "center" }}
             >
               {error}
             </p>
@@ -225,17 +195,14 @@ function Upload() {
                 className="text-secondary text-sm"
                 style={{ marginTop: "var(--space-sm)", textAlign: "right" }}
               >
-                {progress}% processing
+                {progress}% — running 3 model analysis...
               </div>
             </div>
           )}
 
           <div
             className="flex gap-md"
-            style={{
-              marginTop: "var(--space-2xl)",
-              justifyContent: "flex-end",
-            }}
+            style={{ marginTop: "var(--space-2xl)", justifyContent: "flex-end" }}
           >
             <button
               className="btn btn-secondary btn-md"
@@ -249,9 +216,7 @@ function Upload() {
               className="btn btn-primary btn-md"
               disabled={!file || uploading}
               onClick={startUpload}
-              style={
-                !file || uploading ? { opacity: 0.4, cursor: "not-allowed" } : {}
-              }
+              style={!file || uploading ? { opacity: 0.4, cursor: "not-allowed" } : {}}
             >
               Start analysis
             </button>
@@ -263,4 +228,3 @@ function Upload() {
 }
 
 export default Upload;
-

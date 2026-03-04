@@ -149,12 +149,67 @@ def analyze_image(pil_image):
 
     return scores
 
+
+def generate_heatmap(pil_image):
+    """Generate Grad-CAM heatmap using Xception"""
+    try:
+        from pytorch_grad_cam import GradCAM
+        from pytorch_grad_cam.utils.image import show_cam_on_image
+        from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
+        import cv2
+        import base64
+
+        # Prepare image tensor
+        tensor = xception_transform(pil_image).unsqueeze(0).to(device)
+
+        # Get last conv layer for Grad-CAM
+        target_layers = [xception.blocks[-1]]
+
+        # Generate CAM
+        cam = GradCAM(
+            model=xception,
+            target_layers=target_layers
+        )
+
+        # Target class 1 = FAKE
+        targets = [ClassifierOutputTarget(1)]
+        grayscale_cam = cam(
+            input_tensor=tensor,
+            targets=targets
+        )
+        grayscale_cam = grayscale_cam[0, :]
+
+        # Overlay on original image
+        img_resized = pil_image.resize((299, 299))
+        img_array = np.array(img_resized).astype(np.float32) / 255.0
+
+        visualization = show_cam_on_image(
+            img_array,
+            grayscale_cam,
+            use_rgb=True
+        )
+
+        # Convert to base64 for frontend
+        _, buffer = cv2.imencode(
+            '.jpg',
+            cv2.cvtColor(visualization, cv2.COLOR_RGB2BGR)
+        )
+        heatmap_b64 = base64.b64encode(
+            buffer
+        ).decode('utf-8')
+
+        return f"data:image/jpeg;base64,{heatmap_b64}"
+
+    except Exception as e:
+        print(f"Heatmap error: {e}")
+        return None
+
 def ensemble_score(scores):
-    # Weighted: Xception 40%, EfficientNet 35%, MesoNet 25%
+    # EfficientNet excluded until retrained
+    # Xception 55%, MesoNet 45%
     return (
-        scores['xception'] * 0.40 +
-        scores['efficientnet'] * 0.35 +
-        scores['mesonet'] * 0.25
+        scores['xception'] * 0.55 +
+        scores['mesonet'] * 0.45
     )
 
 def get_verdict(score):
@@ -227,10 +282,15 @@ async def analyze(file: UploadFile = File(...)):
             for model, scores in all_scores.items()
         }
 
-        # Final verdict
+       # Final verdict
         final_score = ensemble_score(avg_scores)
         verdict = get_verdict(final_score)
         processing_time = round(time.time() - start_time, 2)
+
+        # Generate heatmap on first frame
+        print("Generating heatmap...")
+        heatmap_url = generate_heatmap(frames[0])
+        print("Heatmap done!" if heatmap_url else "Heatmap failed")
 
         return {
             "verdict": verdict,
@@ -240,7 +300,7 @@ async def analyze(file: UploadFile = File(...)):
             "mesonet_score": round(avg_scores['mesonet'], 1),
             "frames_analyzed": len(frames),
             "processing_time": processing_time,
-            "heatmap_url": None
+            "heatmap_url": heatmap_url
         }
 
     finally:
