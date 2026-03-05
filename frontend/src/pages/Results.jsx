@@ -29,10 +29,41 @@ function Results() {
       ? "score-ring score-ring-fake"
       : "score-ring";
 
-  const handleDownloadReport = () => {
-    // Will connect to backend PDF endpoint in Week 6
-  };
-
+      const handleDownloadReport = async () => {
+        try {
+          const reportData = {
+            filename: filename,
+            verdict: verdict,
+            confidence: (confidence * 100).toFixed(1),
+            xception_score: (models[0]?.score * 100 || 0).toFixed(1),
+            efficientnet_score: (models[1]?.score * 100 || 0).toFixed(1),
+            mesonet_score: (models[2]?.score * 100 || 0).toFixed(1),
+            frames_analyzed: state?.frames_analyzed || 0,
+            processing_time: state?.processing_time || 0,
+            heatmap_url: heatmapUrl,
+          }
+    
+          const res = await fetch("http://127.0.0.1:8000/report-from-data", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(reportData)
+          })
+    
+          if (!res.ok) throw new Error("Report generation failed")
+    
+          const blob = await res.blob()
+          const url = URL.createObjectURL(blob)
+          const link = document.createElement("a")
+          link.href = url
+          link.download = `deepshield-report-${filename}.pdf`
+          link.click()
+          URL.revokeObjectURL(url)
+    
+        } catch (err) {
+          console.error(err)
+          alert("Could not generate report. Make sure backend is running.")
+        }
+      };
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
       <nav className="navbar">

@@ -13,6 +13,20 @@ import tempfile
 import os
 import time
 
+# ── PDF + Report imports ──────────────
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import cm
+from reportlab.lib.colors import HexColor, white, black
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage
+from reportlab.lib.enums import TA_CENTER, TA_LEFT
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+from typing import Optional
+import io
+import base64
+from datetime import datetime
+
 app = FastAPI(title="DeepShield API", version="1.0.0")
 
 app.add_middleware(
@@ -23,9 +37,7 @@ app.add_middleware(
 )
 
 # ── Device ─────────────────────────────
-device = torch.device(
-    "cuda" if torch.cuda.is_available() else "cpu"
-)
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Device: {device}")
 
 # ── Transforms ─────────────────────────
@@ -48,17 +60,13 @@ efficientnet_transform = transforms.Compose([
 print("Loading models...")
 
 # Model 1 — Xception
-xception = timm.create_model(
-    'xception41', pretrained=False, num_classes=2
-)
+xception = timm.create_model('xception41', pretrained=False, num_classes=2)
 try:
     weights_path = hf_hub_download(
         repo_id="deepshield/deepshield-models",
         filename="xception_dfdc.pth"
     )
-    xception.load_state_dict(
-        torch.load(weights_path, map_location=device)
-    )
+    xception.load_state_dict(torch.load(weights_path, map_location=device))
     print("✅ Xception loaded from HuggingFace!")
 except:
     print("⚠️ Using base Xception weights")
@@ -76,9 +84,7 @@ try:
         repo_id="deepshield/deepshield-models",
         filename="efficientnet_dfdc.pth"
     )
-    efficientnet.load_state_dict(
-        torch.load(weights_path, map_location=device)
-    )
+    efficientnet.load_state_dict(torch.load(weights_path, map_location=device))
     print("✅ EfficientNet loaded from HuggingFace!")
 except:
     print("⚠️ Using base EfficientNet weights")
@@ -86,17 +92,13 @@ efficientnet = efficientnet.to(device)
 efficientnet.eval()
 
 # Model 3 — MesoNet
-mesonet = timm.create_model(
-    'efficientnet_b0', pretrained=False, num_classes=2
-)
+mesonet = timm.create_model('efficientnet_b0', pretrained=False, num_classes=2)
 try:
     weights_path = hf_hub_download(
         repo_id="deepshield/deepshield-models",
         filename="mesonet_dfdc.pth"
     )
-    mesonet.load_state_dict(
-        torch.load(weights_path, map_location=device)
-    )
+    mesonet.load_state_dict(torch.load(weights_path, map_location=device))
     print("✅ MesoNet loaded from HuggingFace!")
 except:
     print("⚠️ Using base MesoNet weights")
@@ -104,6 +106,7 @@ mesonet = mesonet.to(device)
 mesonet.eval()
 
 print("✅ All models ready!")
+
 
 # ── Helper Functions ────────────────────
 def extract_frames(video_path, num_frames=10):
@@ -122,6 +125,7 @@ def extract_frames(video_path, num_frames=10):
             frames.append(Image.fromarray(rgb))
     cap.release()
     return frames
+
 
 def analyze_image(pil_image):
     scores = {}
@@ -151,58 +155,34 @@ def analyze_image(pil_image):
 
 
 def generate_heatmap(pil_image):
-    """Generate Grad-CAM heatmap using Xception"""
     try:
         from pytorch_grad_cam import GradCAM
         from pytorch_grad_cam.utils.image import show_cam_on_image
         from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
-        import cv2
-        import base64
 
-        # Prepare image tensor
         tensor = xception_transform(pil_image).unsqueeze(0).to(device)
-
-        # Get last conv layer for Grad-CAM
         target_layers = [xception.blocks[-1]]
 
-        # Generate CAM
-        cam = GradCAM(
-            model=xception,
-            target_layers=target_layers
-        )
-
-        # Target class 1 = FAKE
+        cam = GradCAM(model=xception, target_layers=target_layers)
         targets = [ClassifierOutputTarget(1)]
-        grayscale_cam = cam(
-            input_tensor=tensor,
-            targets=targets
-        )
+        grayscale_cam = cam(input_tensor=tensor, targets=targets)
         grayscale_cam = grayscale_cam[0, :]
 
-        # Overlay on original image
         img_resized = pil_image.resize((299, 299))
         img_array = np.array(img_resized).astype(np.float32) / 255.0
+        visualization = show_cam_on_image(img_array, grayscale_cam, use_rgb=True)
 
-        visualization = show_cam_on_image(
-            img_array,
-            grayscale_cam,
-            use_rgb=True
-        )
-
-        # Convert to base64 for frontend
         _, buffer = cv2.imencode(
             '.jpg',
             cv2.cvtColor(visualization, cv2.COLOR_RGB2BGR)
         )
-        heatmap_b64 = base64.b64encode(
-            buffer
-        ).decode('utf-8')
-
+        heatmap_b64 = base64.b64encode(buffer).decode('utf-8')
         return f"data:image/jpeg;base64,{heatmap_b64}"
 
     except Exception as e:
         print(f"Heatmap error: {e}")
         return None
+
 
 def ensemble_score(scores):
     # EfficientNet excluded until retrained
@@ -212,13 +192,192 @@ def ensemble_score(scores):
         scores['mesonet'] * 0.45
     )
 
+
 def get_verdict(score):
-    if score >= 65:
+    if score >= 85:
         return "FAKE"
-    elif score >= 40:
+    elif score >= 60:
         return "UNCERTAIN"
     else:
         return "REAL"
+
+
+def generate_pdf_report(
+    filename, verdict, confidence,
+    xception_score, efficientnet_score,
+    mesonet_score, frames_analyzed,
+    processing_time, heatmap_b64=None
+):
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=2*cm,
+        leftMargin=2*cm,
+        topMargin=2*cm,
+        bottomMargin=2*cm
+    )
+
+    brand   = HexColor("#4f6ef7")
+    dark    = HexColor("#0a0a0f")
+    danger  = HexColor("#f43f5e")
+    success = HexColor("#10b981")
+    warn    = HexColor("#f59e0b")
+    muted   = HexColor("#6b7280")
+
+    elements = []
+
+    # Header — clean spaced layout
+    elements.append(Spacer(1, 0.3*cm))
+    elements.append(Paragraph(
+        "<font color='#4f6ef7'><b>DeepShield</b></font>",
+        ParagraphStyle("logo", fontSize=20, fontName="Helvetica-Bold",
+                       alignment=TA_CENTER, spaceAfter=0, leading=28)
+    ))
+    elements.append(Spacer(1, 0.25*cm))
+    elements.append(Paragraph(
+        "Deepfake Detection Report",
+        ParagraphStyle("subtitle", fontSize=11, fontName="Helvetica",
+                       textColor=muted, alignment=TA_CENTER, spaceAfter=0, leading=16)
+    ))
+    elements.append(Spacer(1, 0.15*cm))
+    elements.append(Paragraph(
+        datetime.now().strftime("%B %d, %Y"),
+        ParagraphStyle("hdate", fontSize=9, fontName="Helvetica",
+                       textColor=muted, alignment=TA_CENTER, spaceAfter=0, leading=14)
+    ))
+    elements.append(Spacer(1, 0.4*cm))
+    elements.append(Table([[""]], colWidths=[17*cm],
+        style=TableStyle([("LINEBELOW", (0,0), (-1,-1), 1, brand)])))
+    elements.append(Spacer(1, 0.5*cm))
+
+    # File Info
+    elements.append(Paragraph("File Information",
+        ParagraphStyle("section", fontSize=13, fontName="Helvetica-Bold",
+                       textColor=brand, spaceAfter=8)))
+    file_table = Table(
+        [["Filename", filename],
+         ["Frames Analyzed", str(frames_analyzed)],
+         ["Processing Time", f"{processing_time}s"],
+         ["Analysis Date", datetime.now().strftime("%Y-%m-%d")]],
+        colWidths=[5*cm, 12*cm],
+        style=TableStyle([
+            ("FONTNAME",      (0,0), (0,-1), "Helvetica-Bold"),
+            ("FONTNAME",      (1,0), (1,-1), "Helvetica"),
+            ("FONTSIZE",      (0,0), (-1,-1), 10),
+            ("TEXTCOLOR",     (0,0), (0,-1), muted),
+            ("TEXTCOLOR",     (1,0), (1,-1), dark),
+            ("ROWBACKGROUNDS",(0,0), (-1,-1), [HexColor("#f9fafb"), white]),
+            ("PADDING",       (0,0), (-1,-1), 6),
+            ("GRID",          (0,0), (-1,-1), 0.5, HexColor("#e5e7eb")),
+        ])
+    )
+    elements.append(file_table)
+    elements.append(Spacer(1, 0.6*cm))
+
+    # Verdict — no boxes, clean text
+    elements.append(Paragraph("Verdict",
+        ParagraphStyle("section", fontSize=13, fontName="Helvetica-Bold",
+                       textColor=brand, spaceAfter=8)))
+
+    verdict_hex = "#f43f5e" if verdict == "FAKE" else "#10b981" if verdict == "REAL" else "#f59e0b"
+
+    elements.append(Spacer(1, 0.2*cm))
+    elements.append(Paragraph(
+        f"<font color='{verdict_hex}'><b>{verdict}</b></font>",
+        ParagraphStyle("vtext", fontSize=24, fontName="Helvetica-Bold",
+                       alignment=TA_CENTER, spaceAfter=10, leading=30)
+    ))
+    elements.append(Paragraph(
+        f"Ensemble Confidence: <b>{float(confidence):.1f}%</b>",
+        ParagraphStyle("ctext", fontSize=12, fontName="Helvetica",
+                       textColor=muted, alignment=TA_CENTER, spaceAfter=16, leading=16)
+    ))
+    elements.append(Spacer(1, 0.3*cm))
+
+    # Model Scores
+    elements.append(Paragraph("Model Scores",
+        ParagraphStyle("section", fontSize=13, fontName="Helvetica-Bold",
+                       textColor=brand, spaceAfter=8)))
+    score_table = Table(
+        [["Model", "Score", "Interpretation"],
+         ["Xception",       f"{float(xception_score):.1f}%",     "FAKE" if float(xception_score) > 65 else "REAL"],
+         ["EfficientNet-B7",f"{float(efficientnet_score):.1f}%", "FAKE" if float(efficientnet_score) > 65 else "REAL"],
+         ["MesoNet",        f"{float(mesonet_score):.1f}%",      "FAKE" if float(mesonet_score) > 65 else "REAL"],
+         ["Ensemble (Final)",f"{float(confidence):.1f}%",        verdict]],
+        colWidths=[6*cm, 4*cm, 7*cm],
+        style=TableStyle([
+            ("BACKGROUND",    (0,0), (-1,0),  brand),
+            ("TEXTCOLOR",     (0,0), (-1,0),  white),
+            ("FONTNAME",      (0,0), (-1,0),  "Helvetica-Bold"),
+            ("FONTNAME",      (0,1), (-1,-1), "Helvetica"),
+            ("FONTSIZE",      (0,0), (-1,-1), 10),
+            ("ROWBACKGROUNDS",(0,1), (-1,-1), [HexColor("#f9fafb"), white]),
+            ("GRID",          (0,0), (-1,-1), 0.5, HexColor("#e5e7eb")),
+            ("PADDING",       (0,0), (-1,-1), 8),
+            ("ALIGN",         (1,0), (1,-1),  "CENTER"),
+            ("FONTNAME",      (0,4), (-1,4),  "Helvetica-Bold"),
+        ])
+    )
+    elements.append(score_table)
+    elements.append(Spacer(1, 0.6*cm))
+
+    # Heatmap
+    if heatmap_b64:
+        try:
+            elements.append(Paragraph("Heatmap Visualization",
+                ParagraphStyle("section", fontSize=13, fontName="Helvetica-Bold",
+                               textColor=brand, spaceAfter=8)))
+            img_data = base64.b64decode(
+                heatmap_b64.split(",")[1] if "," in heatmap_b64 else heatmap_b64
+            )
+            img_buf = io.BytesIO(img_data)
+            rl_img = RLImage(img_buf, width=10*cm, height=7*cm)
+            elements.append(rl_img)
+            elements.append(Spacer(1, 0.3*cm))
+            elements.append(Paragraph(
+                "Red regions indicate areas most likely to be AI-manipulated. "
+                "Generated using Grad-CAM on the Xception model.",
+                ParagraphStyle("caption", fontSize=9, fontName="Helvetica",
+                               textColor=muted, spaceAfter=12)
+            ))
+        except Exception as e:
+            print(f"Heatmap PDF error: {e}")
+
+    # Disclaimer
+    elements.append(Table([[""]], colWidths=[17*cm],
+        style=TableStyle([("LINEABOVE", (0,0), (-1,-1), 0.5, muted)])))
+    elements.append(Spacer(1, 0.3*cm))
+    elements.append(Paragraph("Legal Disclaimer",
+        ParagraphStyle("disclaimer_title", fontSize=11, fontName="Helvetica-Bold",
+                       textColor=muted, spaceAfter=6)))
+    elements.append(Paragraph(
+        "This report is generated by an automated AI system and is intended "
+        "for informational purposes only. DeepShield does not guarantee the "
+        "accuracy of results. Always combine automated analysis with human "
+        "expert review in legal or high-stakes contexts. DeepShield retains "
+        "no copies of uploaded files or results.",
+        ParagraphStyle("disclaimer_text", fontSize=8, fontName="Helvetica",
+                       textColor=muted, spaceAfter=8)
+    ))
+
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer
+
+
+# ── Pydantic Model ──────────────────────
+class ReportData(BaseModel):
+    filename: str
+    verdict: str
+    confidence: float
+    xception_score: float
+    efficientnet_score: float
+    mesonet_score: float
+    frames_analyzed: int
+    processing_time: float
+    heatmap_url: Optional[str] = None
+
 
 # ── Routes ──────────────────────────────
 @app.get("/")
@@ -230,6 +389,7 @@ def home():
         "models": ["xception", "efficientnet", "mesonet"]
     }
 
+
 @app.get("/health")
 def health():
     return {
@@ -238,23 +398,19 @@ def health():
         "models_loaded": True
     }
 
+
 @app.post("/analyze")
 async def analyze(file: UploadFile = File(...)):
     start_time = time.time()
 
-    # Save uploaded file temporarily
     suffix = os.path.splitext(file.filename)[1]
-    with tempfile.NamedTemporaryFile(
-        delete=False, suffix=suffix
-    ) as tmp:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         content = await file.read()
         tmp.write(content)
         tmp_path = tmp.name
 
     try:
-        is_video = suffix.lower() in [
-            '.mp4', '.mov', '.avi', '.webm', '.mkv'
-        ]
+        is_video = suffix.lower() in ['.mp4', '.mov', '.avi', '.webm', '.mkv']
 
         if is_video:
             frames = extract_frames(tmp_path, num_frames=10)
@@ -264,30 +420,22 @@ async def analyze(file: UploadFile = File(...)):
             img = Image.open(tmp_path).convert('RGB')
             frames = [img]
 
-        # Analyze all frames
-        all_scores = {
-            'xception': [],
-            'efficientnet': [],
-            'mesonet': []
-        }
+        all_scores = {'xception': [], 'efficientnet': [], 'mesonet': []}
 
         for frame in frames:
             scores = analyze_image(frame)
             for model in scores:
                 all_scores[model].append(scores[model])
 
-        # Average across frames
         avg_scores = {
-            model: sum(scores) / len(scores)
-            for model, scores in all_scores.items()
+            model: sum(s) / len(s)
+            for model, s in all_scores.items()
         }
 
-       # Final verdict
         final_score = ensemble_score(avg_scores)
         verdict = get_verdict(final_score)
         processing_time = round(time.time() - start_time, 2)
 
-        # Generate heatmap on first frame
         print("Generating heatmap...")
         heatmap_url = generate_heatmap(frames[0])
         print("Heatmap done!" if heatmap_url else "Heatmap failed")
@@ -306,3 +454,25 @@ async def analyze(file: UploadFile = File(...)):
     finally:
         os.unlink(tmp_path)
 
+
+@app.post("/report-from-data")
+async def report_from_data(data: ReportData):
+    pdf_buffer = generate_pdf_report(
+        filename=data.filename,
+        verdict=data.verdict,
+        confidence=data.confidence,
+        xception_score=data.xception_score,
+        efficientnet_score=data.efficientnet_score,
+        mesonet_score=data.mesonet_score,
+        frames_analyzed=data.frames_analyzed,
+        processing_time=data.processing_time,
+        heatmap_b64=data.heatmap_url
+    )
+
+    return StreamingResponse(
+        pdf_buffer,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": "attachment; filename=deepshield-report.pdf"
+        }
+    )
