@@ -60,18 +60,22 @@ efficientnet_transform = transforms.Compose([
 print("Loading models...")
 
 # Model 1 — Xception
-xception = timm.create_model('xception41', pretrained=False, num_classes=2)
 try:
+    xception = timm.create_model('legacy_xception', pretrained=False, num_classes=2)
     weights_path = hf_hub_download(
         repo_id="deepshield/deepshield-models",
         filename="xception_dfdc.pth"
     )
-    xception.load_state_dict(torch.load(weights_path, map_location=device))
+    state_dict = torch.load(weights_path, map_location=device)
+    xception.load_state_dict(state_dict, strict=False)
+    xception = xception.to(device)
+    xception.eval()
     print("✅ Xception loaded from HuggingFace!")
-except:
-    print("⚠️ Using base Xception weights")
-xception = xception.to(device)
-xception.eval()
+except Exception as e:
+    print(f"⚠️ Xception fallback: {e}")
+    xception = timm.create_model('legacy_xception', pretrained=True, num_classes=2)
+    xception = xception.to(device)
+    xception.eval()
 
 # Model 2 — EfficientNet
 efficientnet = AutoModelForImageClassification.from_pretrained(
@@ -161,7 +165,7 @@ def generate_heatmap(pil_image):
         from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
 
         tensor = xception_transform(pil_image).unsqueeze(0).to(device)
-        target_layers = [xception.blocks[-1]]
+        target_layers = [list(xception.children())[-3]]
 
         cam = GradCAM(model=xception, target_layers=target_layers)
         targets = [ClassifierOutputTarget(1)]
