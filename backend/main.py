@@ -64,7 +64,7 @@ try:
     xception = timm.create_model('legacy_xception', pretrained=False, num_classes=2)
     weights_path = hf_hub_download(
         repo_id="deepshield/deepshield-models",
-        filename="xception_dfdc.pth"
+        filename="xception_deepshield.pth"
     )
     state_dict = torch.load(weights_path, map_location=device)
     xception.load_state_dict(state_dict, strict=False)
@@ -86,7 +86,7 @@ efficientnet = AutoModelForImageClassification.from_pretrained(
 try:
     weights_path = hf_hub_download(
         repo_id="deepshield/deepshield-models",
-        filename="efficientnet_dfdc.pth"
+        filename="efficientnet_deepshield.pth"
     )
     efficientnet.load_state_dict(torch.load(weights_path, map_location=device))
     print("✅ EfficientNet loaded from HuggingFace!")
@@ -134,26 +134,29 @@ def extract_frames(video_path, num_frames=10):
 def analyze_image(pil_image):
     scores = {}
 
-    # Xception
+    # Xception — debug both indices
     with torch.no_grad():
         t = xception_transform(pil_image).unsqueeze(0).to(device)
         out = xception(t)
         prob = F.softmax(out, dim=1)
-        scores['xception'] = prob[0][1].item() * 100
+        print(f"Xception  → [0]={prob[0][0].item()*100:.1f}%  [1]={prob[0][1].item()*100:.1f}%")
+        scores['xception'] = prob[0][0].item() * 100
 
-    # EfficientNet
+    # EfficientNet — debug both indices
     with torch.no_grad():
         t = efficientnet_transform(pil_image).unsqueeze(0).to(device)
         out = efficientnet(t).logits
         prob = F.softmax(out, dim=1)
-        scores['efficientnet'] = prob[0][1].item() * 100
+        print(f"EfficientNet → [0]={prob[0][0].item()*100:.1f}%  [1]={prob[0][1].item()*100:.1f}%")
+        scores['efficientnet'] = prob[0][0].item() * 100
 
-    # MesoNet
+    # MesoNet — debug both indices
     with torch.no_grad():
         t = efficientnet_transform(pil_image).unsqueeze(0).to(device)
         out = mesonet(t)
         prob = F.softmax(out, dim=1)
-        scores['mesonet'] = prob[0][1].item() * 100
+        print(f"MesoNet   → [0]={prob[0][0].item()*100:.1f}%  [1]={prob[0][1].item()*100:.1f}%")
+        scores['mesonet'] = prob[0][0].item() * 100
 
     return scores
 
@@ -189,11 +192,10 @@ def generate_heatmap(pil_image):
 
 
 def ensemble_score(scores):
-    # EfficientNet excluded until retrained
-    # Xception 55%, MesoNet 45%
     return (
-        scores['xception'] * 0.55 +
-        scores['mesonet'] * 0.45
+        scores['xception']     * 0.40 +
+        scores['efficientnet'] * 0.30 +
+        scores['mesonet']      * 0.30
     )
 
 
@@ -231,7 +233,6 @@ def generate_pdf_report(
 
     elements = []
 
-    # Header — clean spaced layout
     elements.append(Spacer(1, 0.3*cm))
     elements.append(Paragraph(
         "<font color='#4f6ef7'><b>DeepShield</b></font>",
@@ -255,7 +256,6 @@ def generate_pdf_report(
         style=TableStyle([("LINEBELOW", (0,0), (-1,-1), 1, brand)])))
     elements.append(Spacer(1, 0.5*cm))
 
-    # File Info
     elements.append(Paragraph("File Information",
         ParagraphStyle("section", fontSize=13, fontName="Helvetica-Bold",
                        textColor=brand, spaceAfter=8)))
@@ -279,7 +279,6 @@ def generate_pdf_report(
     elements.append(file_table)
     elements.append(Spacer(1, 0.6*cm))
 
-    # Verdict — no boxes, clean text
     elements.append(Paragraph("Verdict",
         ParagraphStyle("section", fontSize=13, fontName="Helvetica-Bold",
                        textColor=brand, spaceAfter=8)))
@@ -299,16 +298,15 @@ def generate_pdf_report(
     ))
     elements.append(Spacer(1, 0.3*cm))
 
-    # Model Scores
     elements.append(Paragraph("Model Scores",
         ParagraphStyle("section", fontSize=13, fontName="Helvetica-Bold",
                        textColor=brand, spaceAfter=8)))
     score_table = Table(
         [["Model", "Score", "Interpretation"],
-         ["Xception",       f"{float(xception_score):.1f}%",     "FAKE" if float(xception_score) > 65 else "REAL"],
-         ["EfficientNet-B7",f"{float(efficientnet_score):.1f}%", "FAKE" if float(efficientnet_score) > 65 else "REAL"],
-         ["MesoNet",        f"{float(mesonet_score):.1f}%",      "FAKE" if float(mesonet_score) > 65 else "REAL"],
-         ["Ensemble (Final)",f"{float(confidence):.1f}%",        verdict]],
+         ["Xception",        f"{float(xception_score):.1f}%",     "FAKE" if float(xception_score) > 65 else "REAL"],
+         ["EfficientNet-B7", f"{float(efficientnet_score):.1f}%", "FAKE" if float(efficientnet_score) > 65 else "REAL"],
+         ["MesoNet",         f"{float(mesonet_score):.1f}%",      "FAKE" if float(mesonet_score) > 65 else "REAL"],
+         ["Ensemble (Final)",f"{float(confidence):.1f}%",         verdict]],
         colWidths=[6*cm, 4*cm, 7*cm],
         style=TableStyle([
             ("BACKGROUND",    (0,0), (-1,0),  brand),
@@ -326,7 +324,6 @@ def generate_pdf_report(
     elements.append(score_table)
     elements.append(Spacer(1, 0.6*cm))
 
-    # Heatmap
     if heatmap_b64:
         try:
             elements.append(Paragraph("Heatmap Visualization",
@@ -348,7 +345,6 @@ def generate_pdf_report(
         except Exception as e:
             print(f"Heatmap PDF error: {e}")
 
-    # Disclaimer
     elements.append(Table([[""]], colWidths=[17*cm],
         style=TableStyle([("LINEABOVE", (0,0), (-1,-1), 0.5, muted)])))
     elements.append(Spacer(1, 0.3*cm))
@@ -370,7 +366,6 @@ def generate_pdf_report(
     return buffer
 
 
-# ── Pydantic Model ──────────────────────
 class ReportData(BaseModel):
     filename: str
     verdict: str
@@ -383,30 +378,18 @@ class ReportData(BaseModel):
     heatmap_url: Optional[str] = None
 
 
-# ── Routes ──────────────────────────────
 @app.get("/")
 def home():
-    return {
-        "message": "DeepShield API",
-        "version": "1.0.0",
-        "status": "running",
-        "models": ["xception", "efficientnet", "mesonet"]
-    }
-
+    return {"message": "DeepShield API", "version": "1.0.0", "status": "running"}
 
 @app.get("/health")
 def health():
-    return {
-        "status": "healthy",
-        "device": str(device),
-        "models_loaded": True
-    }
+    return {"status": "healthy", "device": str(device), "models_loaded": True}
 
 
 @app.post("/analyze")
 async def analyze(file: UploadFile = File(...)):
     start_time = time.time()
-
     suffix = os.path.splitext(file.filename)[1]
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         content = await file.read()
@@ -415,7 +398,6 @@ async def analyze(file: UploadFile = File(...)):
 
     try:
         is_video = suffix.lower() in ['.mp4', '.mov', '.avi', '.webm', '.mkv']
-
         if is_video:
             frames = extract_frames(tmp_path, num_frames=10)
             if not frames:
@@ -425,17 +407,12 @@ async def analyze(file: UploadFile = File(...)):
             frames = [img]
 
         all_scores = {'xception': [], 'efficientnet': [], 'mesonet': []}
-
         for frame in frames:
             scores = analyze_image(frame)
             for model in scores:
                 all_scores[model].append(scores[model])
 
-        avg_scores = {
-            model: sum(s) / len(s)
-            for model, s in all_scores.items()
-        }
-
+        avg_scores = {model: sum(s)/len(s) for model, s in all_scores.items()}
         final_score = ensemble_score(avg_scores)
         verdict = get_verdict(final_score)
         processing_time = round(time.time() - start_time, 2)
@@ -454,7 +431,6 @@ async def analyze(file: UploadFile = File(...)):
             "processing_time": processing_time,
             "heatmap_url": heatmap_url
         }
-
     finally:
         os.unlink(tmp_path)
 
@@ -462,21 +438,11 @@ async def analyze(file: UploadFile = File(...)):
 @app.post("/report-from-data")
 async def report_from_data(data: ReportData):
     pdf_buffer = generate_pdf_report(
-        filename=data.filename,
-        verdict=data.verdict,
-        confidence=data.confidence,
-        xception_score=data.xception_score,
-        efficientnet_score=data.efficientnet_score,
-        mesonet_score=data.mesonet_score,
-        frames_analyzed=data.frames_analyzed,
-        processing_time=data.processing_time,
+        filename=data.filename, verdict=data.verdict,
+        confidence=data.confidence, xception_score=data.xception_score,
+        efficientnet_score=data.efficientnet_score, mesonet_score=data.mesonet_score,
+        frames_analyzed=data.frames_analyzed, processing_time=data.processing_time,
         heatmap_b64=data.heatmap_url
     )
-
-    return StreamingResponse(
-        pdf_buffer,
-        media_type="application/pdf",
-        headers={
-            "Content-Disposition": "attachment; filename=deepshield-report.pdf"
-        }
-    )
+    return StreamingResponse(pdf_buffer, media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=deepshield-report.pdf"})
