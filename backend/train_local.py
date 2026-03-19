@@ -10,8 +10,8 @@ from huggingface_hub import hf_hub_download, HfApi
 # ── Config ────────────────────────────
 
 WILD_DIR  = r"D:\dataset"
-HF_TOKEN  = ""
-HF_REPO   = ""
+HF_TOKEN  = "YOUR_HF_TOKEN_HERE"
+HF_REPO   = "YOUR_HF_REPO_HERE"
 
 SKIP_XCEPTION     = True   
 SKIP_EFFICIENTNET = True
