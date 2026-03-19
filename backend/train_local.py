@@ -10,8 +10,8 @@ from huggingface_hub import hf_hub_download, HfApi
 # ── Config ────────────────────────────
 
 WILD_DIR  = r"D:\dataset"
-HF_TOKEN  = "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"
-HF_REPO   = "deepshield/deepshield-models"
+HF_TOKEN  = ""
+HF_REPO   = ""
 
 SKIP_XCEPTION     = True   
 SKIP_EFFICIENTNET = True
