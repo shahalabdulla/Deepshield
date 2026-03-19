@@ -205,3 +205,10 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+backend/models/
+backend/venv/
+backend/__pycache__/
+backend/*.pth
+frontend/node_modules/
+frontend/.env
+.DS_Store

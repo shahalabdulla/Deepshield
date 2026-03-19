@@ -7,11 +7,11 @@ import numpy as np
 from PIL import Image
 import torchvision.transforms as transforms
 import torch.nn.functional as F
-from transformers import AutoModelForImageClassification
 from huggingface_hub import hf_hub_download
 import tempfile
 import os
 import time
+import shutil
 
 # ── PDF + Report imports ──────────────
 from reportlab.lib.pagesizes import A4
@@ -40,6 +40,24 @@ app.add_middleware(
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Device: {device}")
 
+# ── Model Cache ────────────────────────
+MODELS_DIR = os.path.join(os.path.dirname(__file__), "models")
+os.makedirs(MODELS_DIR, exist_ok=True)
+
+def get_model_path(filename):
+    local_path = os.path.join(MODELS_DIR, filename)
+    if os.path.exists(local_path):
+        print(f"✅ Loading {filename} from cache!")
+        return local_path
+    print(f"⬇️  Downloading {filename} from HuggingFace...")
+    path = hf_hub_download(
+        repo_id="deepshield/deepshield-models",
+        filename=filename
+    )
+    shutil.copy(path, local_path)
+    print(f"✅ {filename} cached!")
+    return local_path
+
 # ── Transforms ─────────────────────────
 xception_transform = transforms.Compose([
     transforms.Resize((299, 299)),
@@ -61,53 +79,57 @@ print("Loading models...")
 
 # Model 1 — Xception
 try:
-    xception = timm.create_model('legacy_xception', pretrained=False, num_classes=2)
-    weights_path = hf_hub_download(
-        repo_id="deepshield/deepshield-models",
-        filename="xception_deepshield.pth"
-    )
-    state_dict = torch.load(weights_path, map_location=device)
+    xception = timm.create_model(
+        'legacy_xception', pretrained=False, num_classes=2)
+    weights_path = get_model_path("xception_dfdc.pth")
+    state_dict = torch.load(
+        weights_path, map_location=device, weights_only=True)
     xception.load_state_dict(state_dict, strict=False)
     xception = xception.to(device)
     xception.eval()
-    print("✅ Xception loaded from HuggingFace!")
+    print("✅ Xception loaded!")
 except Exception as e:
     print(f"⚠️ Xception fallback: {e}")
-    xception = timm.create_model('legacy_xception', pretrained=True, num_classes=2)
+    xception = timm.create_model(
+        'legacy_xception', pretrained=True, num_classes=2)
     xception = xception.to(device)
     xception.eval()
 
-# Model 2 — EfficientNet
-efficientnet = AutoModelForImageClassification.from_pretrained(
-    "google/efficientnet-b7",
-    num_labels=2,
-    ignore_mismatched_sizes=True
-)
+# Model 2 — EfficientNet (timm now!)
 try:
-    weights_path = hf_hub_download(
-        repo_id="deepshield/deepshield-models",
-        filename="efficientnet_deepshield.pth"
-    )
-    efficientnet.load_state_dict(torch.load(weights_path, map_location=device))
-    print("✅ EfficientNet loaded from HuggingFace!")
-except:
-    print("⚠️ Using base EfficientNet weights")
-efficientnet = efficientnet.to(device)
-efficientnet.eval()
+    efficientnet = timm.create_model(
+        'efficientnet_b7', pretrained=False, num_classes=2)
+    weights_path = get_model_path("efficientnet_dfdc.pth")
+    state_dict = torch.load(
+        weights_path, map_location=device, weights_only=True)
+    efficientnet.load_state_dict(state_dict, strict=False)
+    efficientnet = efficientnet.to(device)
+    efficientnet.eval()
+    print("✅ EfficientNet loaded!")
+except Exception as e:
+    print(f"⚠️ EfficientNet fallback: {e}")
+    efficientnet = timm.create_model(
+        'efficientnet_b7', pretrained=True, num_classes=2)
+    efficientnet = efficientnet.to(device)
+    efficientnet.eval()
 
 # Model 3 — MesoNet
-mesonet = timm.create_model('efficientnet_b0', pretrained=False, num_classes=2)
 try:
-    weights_path = hf_hub_download(
-        repo_id="deepshield/deepshield-models",
-        filename="mesonet_dfdc.pth"
-    )
-    mesonet.load_state_dict(torch.load(weights_path, map_location=device))
-    print("✅ MesoNet loaded from HuggingFace!")
-except:
-    print("⚠️ Using base MesoNet weights")
-mesonet = mesonet.to(device)
-mesonet.eval()
+    mesonet = timm.create_model(
+        'efficientnet_b0', pretrained=False, num_classes=2)
+    weights_path = get_model_path("mesonet_dfdc.pth")
+    state_dict = torch.load(
+        weights_path, map_location=device, weights_only=True)
+    mesonet.load_state_dict(state_dict, strict=False)
+    mesonet = mesonet.to(device)
+    mesonet.eval()
+    print("✅ MesoNet loaded!")
+except Exception as e:
+    print(f"⚠️ MesoNet fallback: {e}")
+    mesonet = timm.create_model(
+        'efficientnet_b0', pretrained=True, num_classes=2)
+    mesonet = mesonet.to(device)
+    mesonet.eval()
 
 print("✅ All models ready!")
 
@@ -134,28 +156,28 @@ def extract_frames(video_path, num_frames=10):
 def analyze_image(pil_image):
     scores = {}
 
-    # Xception — debug both indices
+    # Xception
     with torch.no_grad():
         t = xception_transform(pil_image).unsqueeze(0).to(device)
         out = xception(t)
         prob = F.softmax(out, dim=1)
-        print(f"Xception  → [0]={prob[0][0].item()*100:.1f}%  [1]={prob[0][1].item()*100:.1f}%")
+        print(f"Xception     → [0]={prob[0][0].item()*100:.1f}%  [1]={prob[0][1].item()*100:.1f}%")
         scores['xception'] = prob[0][0].item() * 100
 
-    # EfficientNet — debug both indices
+    # EfficientNet (timm — no .logits needed!)
     with torch.no_grad():
         t = efficientnet_transform(pil_image).unsqueeze(0).to(device)
-        out = efficientnet(t).logits
+        out = efficientnet(t)
         prob = F.softmax(out, dim=1)
         print(f"EfficientNet → [0]={prob[0][0].item()*100:.1f}%  [1]={prob[0][1].item()*100:.1f}%")
         scores['efficientnet'] = prob[0][0].item() * 100
 
-    # MesoNet — debug both indices
+    # MesoNet
     with torch.no_grad():
         t = efficientnet_transform(pil_image).unsqueeze(0).to(device)
         out = mesonet(t)
         prob = F.softmax(out, dim=1)
-        print(f"MesoNet   → [0]={prob[0][0].item()*100:.1f}%  [1]={prob[0][1].item()*100:.1f}%")
+        print(f"MesoNet      → [0]={prob[0][0].item()*100:.1f}%  [1]={prob[0][1].item()*100:.1f}%")
         scores['mesonet'] = prob[0][0].item() * 100
 
     return scores
@@ -180,9 +202,7 @@ def generate_heatmap(pil_image):
         visualization = show_cam_on_image(img_array, grayscale_cam, use_rgb=True)
 
         _, buffer = cv2.imencode(
-            '.jpg',
-            cv2.cvtColor(visualization, cv2.COLOR_RGB2BGR)
-        )
+            '.jpg', cv2.cvtColor(visualization, cv2.COLOR_RGB2BGR))
         heatmap_b64 = base64.b64encode(buffer).decode('utf-8')
         return f"data:image/jpeg;base64,{heatmap_b64}"
 
@@ -216,23 +236,16 @@ def generate_pdf_report(
 ):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
-        buffer,
-        pagesize=A4,
-        rightMargin=2*cm,
-        leftMargin=2*cm,
-        topMargin=2*cm,
-        bottomMargin=2*cm
+        buffer, pagesize=A4,
+        rightMargin=2*cm, leftMargin=2*cm,
+        topMargin=2*cm, bottomMargin=2*cm
     )
 
     brand   = HexColor("#4f6ef7")
     dark    = HexColor("#0a0a0f")
-    danger  = HexColor("#f43f5e")
-    success = HexColor("#10b981")
-    warn    = HexColor("#f59e0b")
     muted   = HexColor("#6b7280")
 
     elements = []
-
     elements.append(Spacer(1, 0.3*cm))
     elements.append(Paragraph(
         "<font color='#4f6ef7'><b>DeepShield</b></font>",
@@ -282,9 +295,7 @@ def generate_pdf_report(
     elements.append(Paragraph("Verdict",
         ParagraphStyle("section", fontSize=13, fontName="Helvetica-Bold",
                        textColor=brand, spaceAfter=8)))
-
     verdict_hex = "#f43f5e" if verdict == "FAKE" else "#10b981" if verdict == "REAL" else "#f59e0b"
-
     elements.append(Spacer(1, 0.2*cm))
     elements.append(Paragraph(
         f"<font color='{verdict_hex}'><b>{verdict}</b></font>",
@@ -330,8 +341,7 @@ def generate_pdf_report(
                 ParagraphStyle("section", fontSize=13, fontName="Helvetica-Bold",
                                textColor=brand, spaceAfter=8)))
             img_data = base64.b64decode(
-                heatmap_b64.split(",")[1] if "," in heatmap_b64 else heatmap_b64
-            )
+                heatmap_b64.split(",")[1] if "," in heatmap_b64 else heatmap_b64)
             img_buf = io.BytesIO(img_data)
             rl_img = RLImage(img_buf, width=10*cm, height=7*cm)
             elements.append(rl_img)
